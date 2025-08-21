@@ -1,0 +1,9 @@
+{
+  "id": "auto-wiki-summarize",
+  "name": "Auto Wiki Summarize", 
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "Automatically summarizes new notes created from wiki-links",
+  "author": "Zettelkasten Enhancer",
+  "isDesktopOnly": false
+}
