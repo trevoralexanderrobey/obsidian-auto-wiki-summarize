@@ -53,6 +53,7 @@ Guidelines:
 - When the empty note opens, the plugin inserts a completed definition template using the origin note as context.
 - To regenerate for an existing note: Command palette → "Regenerate definition for current note". The plugin uses the previously active note as origin when available; otherwise it falls back to the current note content.
 - Pick a specific origin note: Command palette → "Pick origin note, then regenerate" to choose context explicitly via a note picker.
+- Test API without modifying the note: Command palette → "Test API roundtrip (log only)". Result is logged to the developer console.
 
 ## How it works (technical)
 - Listens to `file-open` events; when an empty Markdown file opens, it treats the previously active note as the origin context.
@@ -66,6 +67,11 @@ Guidelines:
 - Nothing happens: ensure the new note is empty and you clicked a freshly created wiki link.
 - API errors: verify your Copilot license key in settings and that you have network access.
 - Double insertion: if you undo/redo and the note becomes empty again, the plugin may re-trigger on reopen.
+
+## Debugging
+- Open the developer console (Cmd+Opt+I on macOS) and check logs under "[Contextual Wiki Definitions]".
+- The plugin shows progress/failure via Obsidian notices (top-right toasts).
+- Use "Test API roundtrip (log only)" to validate your license/endpoint without modifying notes.
 
 ## License
 MIT

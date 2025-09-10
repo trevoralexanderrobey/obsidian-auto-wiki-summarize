@@ -1,9 +1,10 @@
-const { Plugin, PluginSettingTab, Setting, SuggestModal } = require('obsidian');
+const { Plugin, PluginSettingTab, Setting, SuggestModal, Notice } = require('obsidian');
 
 module.exports = class ContextualWikiDefinitions extends Plugin {
   async onload() {
     await this.loadSettings();
     this.previousFile = this.app.workspace.getActiveFile();
+    this._recentlyProcessed = new Set();
 
     this.registerEvent(
       this.app.workspace.on('file-open', async (file) => {
@@ -15,12 +16,18 @@ module.exports = class ContextualWikiDefinitions extends Plugin {
         if (file.extension !== 'md') return;
         const stat = file.stat;
         if (stat && stat.size === 0) {
+          if (this._isRecentlyProcessed(file.path)) return;
+          this._markProcessed(file.path);
           const context = await this.app.vault.read(origin);
           const term = file.basename;
-          const prompt = this.buildPrompt(term, context);
+          const prompt = this.buildPrompt(term, this._truncateContext(context));
+          new Notice('Generating definition…');
           const definition = await this.queryCopilot(prompt);
           if (definition) {
             await this.app.vault.modify(file, definition);
+            new Notice('Definition inserted.');
+          } else {
+            new Notice('Definition generation failed (see console).');
           }
         }
       })
@@ -58,6 +65,26 @@ module.exports = class ContextualWikiDefinitions extends Plugin {
           }
         });
         modal.open();
+      },
+    });
+
+    this.addCommand({
+      id: 'test-api-roundtrip-log-only',
+      name: 'Test API roundtrip (log only)',
+      callback: async () => {
+        try {
+          const file = this.app.workspace.getActiveFile();
+          if (!file) { new Notice('Open a note to test.'); return; }
+          const ctx = await this.app.vault.read(file);
+          const prompt = this.buildPrompt(file.basename, this._truncateContext(ctx));
+          new Notice('Testing API…');
+          const out = await this.queryCopilot(prompt);
+          console.log('[Contextual Wiki Definitions] Test output:', out);
+          new Notice(out ? 'API OK — see console' : 'API failed — see console');
+        } catch (err) {
+          console.error('Test API failed', err);
+          new Notice('Test failed (see console)');
+        }
       },
     });
   }
@@ -117,10 +144,14 @@ ${context}`;
     } catch (_) {}
 
     const term = target.basename;
-    const prompt = this.buildPrompt(term, context);
+    const prompt = this.buildPrompt(term, this._truncateContext(context));
+    new Notice('Generating definition…');
     const definition = await this.queryCopilot(prompt);
     if (definition) {
       await this.app.vault.modify(target, definition);
+      new Notice('Definition inserted.');
+    } else {
+      new Notice('Definition generation failed (see console).');
     }
   }
 
@@ -128,6 +159,8 @@ ${context}`;
     const licenseKey = this.settings.licenseKey;
     if (!licenseKey) return null;
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
       const res = await fetch('https://api.brevilabs.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -139,8 +172,14 @@ ${context}`;
           messages: [
             { role: 'user', content: prompt }
           ]
-        })
+        }),
+        signal: controller.signal
       });
+      clearTimeout(timeout);
+      if (!res.ok) {
+        console.error('Copilot non-OK response', res.status, await res.text());
+        return null;
+      }
       const data = await res.json();
       return data.choices?.[0]?.message?.content?.trim() || null;
     } catch (e) {
@@ -155,6 +194,20 @@ ${context}`;
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+  _truncateContext(text) {
+    const max = 20000; // chars
+    if (!text) return '';
+    return text.length > max ? text.slice(0, max) : text;
+  }
+
+  _isRecentlyProcessed(path) {
+    return this._recentlyProcessed.has(path);
+  }
+
+  _markProcessed(path) {
+    this._recentlyProcessed.add(path);
+    setTimeout(() => this._recentlyProcessed.delete(path), 5000);
   }
 };
 
