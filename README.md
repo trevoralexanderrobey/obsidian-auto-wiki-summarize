@@ -52,6 +52,7 @@ Guidelines:
 - Type a wiki link like `[[Your Term]]` in a note, then click it.
 - When the empty note opens, the plugin inserts a completed definition template using the origin note as context.
 - To regenerate for an existing note: Command palette → "Regenerate definition for current note". The plugin uses the previously active note as origin when available; otherwise it falls back to the current note content.
+- Pick a specific origin note: Command palette → "Pick origin note, then regenerate" to choose context explicitly via a note picker.
 
 ## How it works (technical)
 - Listens to `file-open` events; when an empty Markdown file opens, it treats the previously active note as the origin context.

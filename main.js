@@ -1,4 +1,4 @@
-const { Plugin, PluginSettingTab, Setting } = require('obsidian');
+const { Plugin, PluginSettingTab, Setting, SuggestModal } = require('obsidian');
 
 module.exports = class ContextualWikiDefinitions extends Plugin {
   async onload() {
@@ -33,6 +33,31 @@ module.exports = class ContextualWikiDefinitions extends Plugin {
       name: 'Regenerate definition for current note',
       callback: async () => {
         await this.regenerateForCurrentNote();
+      },
+    });
+
+    this.addCommand({
+      id: 'pick-origin-and-regenerate',
+      name: 'Pick origin note, then regenerate',
+      callback: async () => {
+        const target = this.app.workspace.getActiveFile();
+        if (!target || target.extension !== 'md') return;
+
+        const files = this.app.vault.getMarkdownFiles();
+        const modal = new OriginNoteSuggestModal(this.app, files, async (origin) => {
+          try {
+            const context = await this.app.vault.read(origin);
+            const term = target.basename;
+            const prompt = this.buildPrompt(term, context);
+            const definition = await this.queryCopilot(prompt);
+            if (definition) {
+              await this.app.vault.modify(target, definition);
+            }
+          } catch (e) {
+            console.error('Failed to regenerate with picked origin', e);
+          }
+        });
+        modal.open();
       },
     });
   }
@@ -154,5 +179,32 @@ class ContextualDefinitionSettingTab extends PluginSettingTab {
           this.plugin.settings.licenseKey = value.trim();
           await this.plugin.saveSettings();
         }));
+  }
+}
+
+class OriginNoteSuggestModal extends SuggestModal {
+  constructor(app, files, onChoose) {
+    super(app);
+    this.files = files || [];
+    this.onChoose = onChoose;
+    this.setPlaceholder('Type to search origin note…');
+  }
+
+  getSuggestions(query) {
+    const q = (query || '').toLowerCase();
+    return this.files
+      .filter((f) => f.basename.toLowerCase().includes(q) || f.path.toLowerCase().includes(q))
+      .slice(0, 100);
+  }
+
+  renderSuggestion(file, el) {
+    el.createEl('div', { text: file.basename });
+    el.createEl('small', { text: file.path, cls: 'mod-muted' });
+  }
+
+  onChooseSuggestion(file) {
+    if (typeof this.onChoose === 'function') {
+      this.onChoose(file);
+    }
   }
 }
