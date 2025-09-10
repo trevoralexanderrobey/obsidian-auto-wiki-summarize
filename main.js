@@ -172,61 +172,106 @@ ${context}`;
   async queryCopilot(prompt) {
     const licenseKey = this.settings.licenseKey;
     if (!licenseKey) return null;
-    try {
+    // Helper to call endpoint
+    const call = async ({ model, stream, accept }) => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 30000);
-      const res = await fetch('https://api.brevilabs.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': `Bearer ${licenseKey}`,
-        },
-        body: JSON.stringify({
-          model: 'copilot-plus-flash',
-          stream: false,
-          messages: [
-            { role: 'user', content: prompt }
-          ]
-        }),
-        signal: controller.signal
-      });
-      clearTimeout(timeout);
-      if (!res.ok) {
-        console.error('Copilot non-OK response', res.status, await res.text());
-        return null;
-      }
-      const ct = (res.headers.get('content-type') || '').toLowerCase();
-      const text = await res.text();
-      // Try JSON first
       try {
-        const data = JSON.parse(text);
-        if (data && data.choices && data.choices[0] && data.choices[0].message) {
-          return data.choices[0].message.content?.trim() || null;
-        }
-        throw new TypeError('Missing choices in JSON payload');
-      } catch (jsonErr) {
-        // Fallback: parse potential SSE stream
-        if (ct.includes('text/event-stream') || text.startsWith('data:')) {
-          let out = '';
-          for (const rawLine of text.split('\n')) {
-            const line = rawLine.trim();
-            if (!line.startsWith('data:')) continue;
-            const payload = line.slice(5).trim();
-            if (!payload || payload === '[DONE]') continue;
-            try {
-              const evt = JSON.parse(payload);
-              const choice = evt.choices && evt.choices[0];
-              const delta = choice && (choice.delta || choice.message);
-              const chunk = delta && (delta.content || '');
-              if (chunk) out += chunk;
-            } catch (_) {}
-          }
-          return out.trim() || null;
-        }
-        console.error('Copilot JSON parse failed', jsonErr, 'Raw response:', text);
-        return null;
+        const res = await fetch('https://api.brevilabs.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': accept || 'application/json',
+            'Authorization': `Bearer ${licenseKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            stream: !!stream,
+            temperature: 0.2,
+            messages: [ { role: 'user', content: prompt } ]
+          }),
+          signal: controller.signal
+        });
+        clearTimeout(timeout);
+        return res;
+      } catch (e) {
+        clearTimeout(timeout);
+        throw e;
       }
+    };
+
+    try {
+      // Attempt 1: JSON, non-stream, flash model
+      let res = await call({ model: 'copilot-plus-flash', stream: false, accept: 'application/json' });
+      if (!res.ok) {
+        console.error('Copilot non-OK response (1)', res.status, await res.text());
+      } else {
+        const ct1 = (res.headers.get('content-type') || '').toLowerCase();
+        const text1 = await res.text();
+        try {
+          const data1 = JSON.parse(text1);
+          const msg1 = data1 && data1.choices && data1.choices[0] && data1.choices[0].message;
+          if (msg1 && msg1.content) return msg1.content.trim();
+          throw new TypeError('Missing choices in JSON payload');
+        } catch (e1) {
+          if (ct1.includes('text/event-stream') || text1.startsWith('data:')) {
+            let out = '';
+            for (const rawLine of text1.split('\n')) {
+              const line = rawLine.trim();
+              if (!line.startsWith('data:')) continue;
+              const payload = line.slice(5).trim();
+              if (!payload || payload === '[DONE]') continue;
+              try {
+                const evt = JSON.parse(payload);
+                const choice = evt.choices && evt.choices[0];
+                const delta = choice && (choice.delta || choice.message);
+                const chunk = delta && (delta.content || '');
+                if (chunk) out += chunk;
+              } catch (_) {}
+            }
+            if (out.trim()) return out.trim();
+          }
+          console.warn('Copilot parse failed (1)', e1, 'Raw:', text1);
+        }
+      }
+
+      // Attempt 2: SSE stream, flash model
+      try {
+        res = await call({ model: 'copilot-plus-flash', stream: true, accept: 'text/event-stream,*/*' });
+        const text2 = await res.text();
+        let out2 = '';
+        for (const rawLine of text2.split('\n')) {
+          const line = rawLine.trim();
+          if (!line.startsWith('data:')) continue;
+          const payload = line.slice(5).trim();
+          if (!payload || payload === '[DONE]') continue;
+          try {
+            const evt = JSON.parse(payload);
+            const choice = evt.choices && evt.choices[0];
+            const delta = choice && (choice.delta || choice.message);
+            const chunk = delta && (delta.content || '');
+            if (chunk) out2 += chunk;
+          } catch (_) {}
+        }
+        if (out2.trim()) return out2.trim();
+      } catch (e2) {
+        console.warn('Copilot SSE attempt failed (2)', e2);
+      }
+
+      // Attempt 3: JSON, non-stream, non-flash model
+      try {
+        res = await call({ model: 'copilot-plus', stream: false, accept: 'application/json' });
+        const text3 = await res.text();
+        try {
+          const data3 = JSON.parse(text3);
+          const msg3 = data3 && data3.choices && data3.choices[0] && data3.choices[0].message;
+          if (msg3 && msg3.content) return msg3.content.trim();
+        } catch (_) {}
+      } catch (e3) {
+        console.warn('Copilot non-flash attempt failed (3)', e3);
+      }
+
+      return null;
     } catch (e) {
       console.error('Copilot request failed', e);
       return null;
