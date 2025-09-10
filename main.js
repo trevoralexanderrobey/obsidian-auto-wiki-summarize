@@ -5,6 +5,7 @@ module.exports = class ContextualWikiDefinitions extends Plugin {
     await this.loadSettings();
     this.previousFile = this.app.workspace.getActiveFile();
     this._recentlyProcessed = new Set();
+    this._attemptCounts = new Map();
 
     this.registerEvent(
       this.app.workspace.on('file-open', async (file) => {
@@ -36,9 +37,34 @@ module.exports = class ContextualWikiDefinitions extends Plugin {
             const definition = await this.queryCopilot(prompt);
             if (definition) {
               await this.app.vault.modify(file, definition);
+              this._attemptCounts.delete(file.path);
               new Notice('Definition inserted.');
             } else {
-              new Notice('Definition generation failed (see console).');
+              // Do not show an error yet; retry once after a short delay
+              const key = file.path;
+              const count = (this._attemptCounts.get(key) || 0) + 1;
+              this._attemptCounts.set(key, count);
+              if (count <= 1) {
+                setTimeout(async () => {
+                  try {
+                    const freshCtx = await this.app.vault.read(origin);
+                    const retryPrompt = this.buildPrompt(term, this._truncateContext(freshCtx));
+                    const second = await this.queryCopilot(retryPrompt);
+                    if (second) {
+                      await this.app.vault.modify(file, second);
+                      this._attemptCounts.delete(key);
+                      new Notice('Definition inserted.');
+                    } else {
+                      new Notice('Definition generation failed (see console).');
+                    }
+                  } catch (e) {
+                    console.error('Retry generation failed', e);
+                    new Notice('Definition generation failed (see console).');
+                  }
+                }, 1000);
+              } else {
+                new Notice('Definition generation failed (see console).');
+              }
             }
           } catch (err) {
             console.error('Contextual Wiki Definitions: file-open handler failed', err);
