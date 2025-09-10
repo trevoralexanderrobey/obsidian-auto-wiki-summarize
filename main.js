@@ -165,10 +165,12 @@ ${context}`;
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
           'Authorization': `Bearer ${licenseKey}`,
         },
         body: JSON.stringify({
           model: 'copilot-plus-flash',
+          stream: false,
           messages: [
             { role: 'user', content: prompt }
           ]
@@ -180,8 +182,34 @@ ${context}`;
         console.error('Copilot non-OK response', res.status, await res.text());
         return null;
       }
-      const data = await res.json();
-      return data.choices?.[0]?.message?.content?.trim() || null;
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      const text = await res.text();
+      // Try JSON first
+      try {
+        const data = JSON.parse(text);
+        return data.choices?.[0]?.message?.content?.trim() || null;
+      } catch (jsonErr) {
+        // Fallback: parse potential SSE stream
+        if (ct.includes('text/event-stream') || text.startsWith('data:')) {
+          let out = '';
+          for (const rawLine of text.split('\n')) {
+            const line = rawLine.trim();
+            if (!line.startsWith('data:')) continue;
+            const payload = line.slice(5).trim();
+            if (!payload || payload === '[DONE]') continue;
+            try {
+              const evt = JSON.parse(payload);
+              const choice = evt.choices && evt.choices[0];
+              const delta = choice && (choice.delta || choice.message);
+              const chunk = delta && (delta.content || '');
+              if (chunk) out += chunk;
+            } catch (_) {}
+          }
+          return out.trim() || null;
+        }
+        console.error('Copilot JSON parse failed', jsonErr, 'Raw response:', text);
+        return null;
+      }
     } catch (e) {
       console.error('Copilot request failed', e);
       return null;
