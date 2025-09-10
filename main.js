@@ -12,24 +12,38 @@ module.exports = class ContextualWikiDefinitions extends Plugin {
         this.previousFile = file;
         if (!file || !origin) return;
 
-        // Only process brand new empty markdown notes
         if (file.extension !== 'md') return;
-        const stat = file.stat;
-        if (stat && stat.size === 0) {
-          if (this._isRecentlyProcessed(file.path)) return;
-          this._markProcessed(file.path);
-          const context = await this.app.vault.read(origin);
-          const term = file.basename;
-          const prompt = this.buildPrompt(term, this._truncateContext(context));
-          new Notice('Generating definition…');
-          const definition = await this.queryCopilot(prompt);
-          if (definition) {
-            await this.app.vault.modify(file, definition);
-            new Notice('Definition inserted.');
-          } else {
-            new Notice('Definition generation failed (see console).');
+
+        // Defer slightly to let other plugins (e.g., Templater) run first
+        window.setTimeout(async () => {
+          try {
+            const stat = file.stat;
+            const raw = await this.app.vault.read(file);
+            const content = (raw || '').trim();
+            const looksEmpty = !content || content.length < 10;
+            const templaterError = /templater/i.test(content) && /error|abort/i.test(content);
+            const alreadyPopulated = content.includes('## Term - The term being defined:');
+
+            if (alreadyPopulated) return;
+            if (!(stat && stat.size === 0) && !looksEmpty && !templaterError) return;
+            if (this._isRecentlyProcessed(file.path)) return;
+            this._markProcessed(file.path);
+
+            const context = await this.app.vault.read(origin);
+            const term = file.basename;
+            const prompt = this.buildPrompt(term, this._truncateContext(context));
+            new Notice('Generating definition…');
+            const definition = await this.queryCopilot(prompt);
+            if (definition) {
+              await this.app.vault.modify(file, definition);
+              new Notice('Definition inserted.');
+            } else {
+              new Notice('Definition generation failed (see console).');
+            }
+          } catch (err) {
+            console.error('Contextual Wiki Definitions: file-open handler failed', err);
           }
-        }
+        }, 300);
       })
     );
 
@@ -187,7 +201,10 @@ ${context}`;
       // Try JSON first
       try {
         const data = JSON.parse(text);
-        return data.choices?.[0]?.message?.content?.trim() || null;
+        if (data && data.choices && data.choices[0] && data.choices[0].message) {
+          return data.choices[0].message.content?.trim() || null;
+        }
+        throw new TypeError('Missing choices in JSON payload');
       } catch (jsonErr) {
         // Fallback: parse potential SSE stream
         if (ct.includes('text/event-stream') || text.startsWith('data:')) {
