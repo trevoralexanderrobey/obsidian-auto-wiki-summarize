@@ -1,23 +1,21 @@
-# Auto Wiki Summarize (Obsidian Plugin)
+# Contextual Wiki Definitions
 
-Automatically defines newly created wiki-linked notes using Merriam-Webster and adds contextual usage from the originating note.
+This Obsidian plugin automatically populates new notes created from wiki links with a context-aware definition template. When you click a wiki link to a note that does not yet exist, the plugin:
 
-## Features
-- Fetches definitions from Merriam-Webster (requires API key)
-- Preserves your templates and appends a Definition section
-- Adds an In Context section quoting usage from origin note(s)
+1. Detects the origin note and captures its content.
+2. Sends the wiki-linked term and origin context to the Copilot API.
+3. Inserts the returned definition template into the newly created note.
 
 ## Setup
-1. Register and get an API key: https://dictionaryapi.com/register/index
-2. In Obsidian: Settings → Community plugins → Auto Wiki Summarize → enter API key
-3. Choose dictionary: Collegiate or Learner’s
+- Provide your Copilot believer or plus license key in the plugin settings.
+- Enable the plugin in Obsidian.
 
-## Usage
-- Create a note via wiki link [[Term]] and click it. The plugin adds Definition and In Context automatically.
-- Command palette: "Define current note (Auto Wiki Summarize)" to refresh the sections.
+## How it works
+- When a new note is opened and it is empty, the plugin uses the previously active note as context.
+- It requests a definition following a strict template and writes the result into the new note.
 
 ## Privacy
-- Definitions are fetched from Merriam-Webster APIs. No other data is transmitted.
+Only the origin note content and the wiki-linked term are sent to the Copilot API.
 
 ## License
 MIT
