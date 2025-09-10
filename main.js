@@ -27,6 +27,14 @@ module.exports = class ContextualWikiDefinitions extends Plugin {
     );
 
     this.addSettingTab(new ContextualDefinitionSettingTab(this.app, this));
+
+    this.addCommand({
+      id: 'regenerate-definition',
+      name: 'Regenerate definition for current note',
+      callback: async () => {
+        await this.regenerateForCurrentNote();
+      },
+    });
   }
 
   buildPrompt(term, context) {
@@ -64,6 +72,31 @@ Guidelines:
 
 Originating note context:
 ${context}`;
+  }
+
+  async regenerateForCurrentNote() {
+    const target = this.app.workspace.getActiveFile();
+    if (!target || target.extension !== 'md') return;
+
+    const origin = (this.previousFile && this.previousFile.path !== target.path)
+      ? this.previousFile
+      : null;
+    let context = '';
+    try {
+      if (origin) {
+        context = await this.app.vault.read(origin);
+      } else {
+        // Fallback: use current note content if no distinct origin is known
+        context = await this.app.vault.read(target);
+      }
+    } catch (_) {}
+
+    const term = target.basename;
+    const prompt = this.buildPrompt(term, context);
+    const definition = await this.queryCopilot(prompt);
+    if (definition) {
+      await this.app.vault.modify(target, definition);
+    }
   }
 
   async queryCopilot(prompt) {
