@@ -39,8 +39,7 @@ Instructions:
 - Prefer [[wiki links]] for related concepts already present in the vault context.
 
 Output strictly in this template:
-## Term
-- The term being defined: [[${term}]]
+## Term - The term being defined: [[${term}]]
 ## One‑Sentence Definition
 - A single, precise sentence that captures the essence in this note’s context.
 ## Full Definition (Context‑Aware)
