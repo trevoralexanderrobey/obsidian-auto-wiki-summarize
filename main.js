@@ -9,7 +9,7 @@ module.exports = class ContextualWikiDefinitions extends Plugin {
 
     this.registerEvent(
       this.app.workspace.on('file-open', async (file) => {
-        const origin = this.previousFile;
+            const origin = this.previousFile;
         this.previousFile = file;
         if (!file || !origin) return;
 
@@ -32,10 +32,12 @@ module.exports = class ContextualWikiDefinitions extends Plugin {
 
             const context = await this.app.vault.read(origin);
             const term = file.basename;
-            const prompt = this.buildPrompt(term, this._truncateContext(context));
+            const originLink = this._computeOriginLinktext(origin, file);
+            const prompt = this.buildPrompt(term, this._truncateContext(context), originLink);
             new Notice('Generating definition…');
-            const definition = await this.queryCopilot(prompt);
+            let definition = await this.queryCopilot(prompt);
             if (definition) {
+              definition = this._ensureSourceContextFromLine(definition, originLink);
               await this.app.vault.modify(file, definition);
               this._attemptCounts.delete(file.path);
               new Notice('Definition inserted.');
@@ -48,9 +50,11 @@ module.exports = class ContextualWikiDefinitions extends Plugin {
                 setTimeout(async () => {
                   try {
                     const freshCtx = await this.app.vault.read(origin);
-                    const retryPrompt = this.buildPrompt(term, this._truncateContext(freshCtx));
-                    const second = await this.queryCopilot(retryPrompt);
+                    const retryOriginLink = this._computeOriginLinktext(origin, file);
+                    const retryPrompt = this.buildPrompt(term, this._truncateContext(freshCtx), retryOriginLink);
+                    let second = await this.queryCopilot(retryPrompt);
                     if (second) {
+                      second = this._ensureSourceContextFromLine(second, retryOriginLink);
                       await this.app.vault.modify(file, second);
                       this._attemptCounts.delete(key);
                       new Notice('Definition inserted.');
@@ -63,7 +67,15 @@ module.exports = class ContextualWikiDefinitions extends Plugin {
                   }
                 }, 1000);
               } else {
-                new Notice('Definition generation failed (see console).');
+                // Fallback: insert a minimal local template so user gets the From link
+                try {
+                  const fallback = this._buildLocalTemplate(term, originLink, this._truncateContext(context));
+                  await this.app.vault.modify(file, fallback);
+                  new Notice('Inserted local fallback definition (API failed).');
+                } catch (e) {
+                  console.error('Failed to insert fallback template', e);
+                  new Notice('Definition generation failed (see console).');
+                }
               }
             }
           } catch (err) {
@@ -95,10 +107,20 @@ module.exports = class ContextualWikiDefinitions extends Plugin {
           try {
             const context = await this.app.vault.read(origin);
             const term = target.basename;
-            const prompt = this.buildPrompt(term, context);
-            const definition = await this.queryCopilot(prompt);
+            const originLink = this._computeOriginLinktext(origin, target);
+            const prompt = this.buildPrompt(term, context, originLink);
+            let definition = await this.queryCopilot(prompt);
             if (definition) {
+              definition = this._ensureSourceContextFromLine(definition, originLink);
               await this.app.vault.modify(target, definition);
+            } else {
+              try {
+                const fallback = this._buildLocalTemplate(term, originLink, this._truncateContext(context));
+                await this.app.vault.modify(target, fallback);
+                new Notice('Inserted local fallback definition (API failed).');
+              } catch (e) {
+                console.error('Failed to insert fallback template (picker)', e);
+              }
             }
           } catch (e) {
             console.error('Failed to regenerate with picked origin', e);
@@ -116,7 +138,8 @@ module.exports = class ContextualWikiDefinitions extends Plugin {
           const file = this.app.workspace.getActiveFile();
           if (!file) { new Notice('Open a note to test.'); return; }
           const ctx = await this.app.vault.read(file);
-          const prompt = this.buildPrompt(file.basename, this._truncateContext(ctx));
+          const originLink = this._computeOriginLinktext(file, file);
+          const prompt = this.buildPrompt(file.basename, this._truncateContext(ctx), originLink);
           new Notice('Testing API…');
           const out = await this.queryCopilot(prompt);
           console.log('[Contextual Wiki Definitions] Test output:', out);
@@ -129,7 +152,7 @@ module.exports = class ContextualWikiDefinitions extends Plugin {
     });
   }
 
-  buildPrompt(term, context) {
+  buildPrompt(term, context, originLink) {
     return `Role: You create precise, context-grounded definitions for a selected [[Wiki Link]] using only the originating note's context and closely related vault context the model already has. Prioritize clarity, correctness, and semantic linkage.
 
 Instructions:
@@ -155,6 +178,7 @@ Output strictly in this template:
 ## Boundaries (What It’s Not)
 - Contrast with near‑miss ideas to avoid confusion.
 ## Source Context (From the Note)
+- From: ${originLink}
 > Quote or paraphrase the 1–3 most relevant lines from the originating note that justify this definition.
 
 Guidelines:
@@ -184,15 +208,80 @@ ${context}`;
     } catch (_) {}
 
     const term = target.basename;
-    const prompt = this.buildPrompt(term, this._truncateContext(context));
+    const originFile = origin || target;
+    const originLink = this._computeOriginLinktext(originFile, target);
+    const prompt = this.buildPrompt(term, this._truncateContext(context), originLink);
     new Notice('Generating definition…');
-    const definition = await this.queryCopilot(prompt);
+    let definition = await this.queryCopilot(prompt);
     if (definition) {
+      definition = this._ensureSourceContextFromLine(definition, originLink);
       await this.app.vault.modify(target, definition);
       new Notice('Definition inserted.');
     } else {
-      new Notice('Definition generation failed (see console).');
+      try {
+        const fallback = this._buildLocalTemplate(term, originLink, this._truncateContext(context));
+        await this.app.vault.modify(target, fallback);
+        new Notice('Inserted local fallback definition (API failed).');
+      } catch (e) {
+        console.error('Failed to insert fallback template (regen)', e);
+        new Notice('Definition generation failed (see console).');
+      }
     }
+  }
+
+  _computeOriginLinktext(originFile, targetFile) {
+    try {
+      if (!originFile) return '[[Unknown Origin]]';
+      const sourcePath = targetFile && targetFile.path ? targetFile.path : '';
+      const linktext = this.app.metadataCache.fileToLinktext(originFile, sourcePath, false);
+      return `[[${linktext}]]`;
+    } catch (_) {
+      return originFile && originFile.basename ? `[[${originFile.basename}]]` : '[[Unknown Origin]]';
+    }
+  }
+
+  _ensureSourceContextFromLine(text, originLink) {
+    try {
+      if (!text) return text;
+      const lines = text.split('\n');
+      const headerIndex = lines.findIndex((l) => l.trim().toLowerCase() === '## source context (from the note)'.toLowerCase());
+      if (headerIndex === -1) {
+        // Append a minimal Source Context section if missing
+        return `${text.trim()}\n\n## Source Context (From the Note)\n- From: ${originLink}\n`;
+      }
+      // Check next few lines for a "- From:" entry; insert if missing
+      const insertionIndex = headerIndex + 1;
+      const alreadyHasFrom = lines.slice(insertionIndex, insertionIndex + 3).some((l) => /^-\s*From\s*:/i.test(l.trim()));
+      if (!alreadyHasFrom) {
+        lines.splice(insertionIndex, 0, `- From: ${originLink}`);
+      }
+      return lines.join('\n');
+    } catch (_) {
+      return text;
+    }
+  }
+
+  _buildLocalTemplate(term, originLink, context) {
+    const safeContext = context || '';
+    return `## Term - The term being defined: [[${term}]]
+## One‑Sentence Definition
+- <pending>
+## Full Definition (Context‑Aware)
+- <pending>
+## Real‑World Applications
+- <pending>
+## Related Concepts (Semantic Neighbors)
+- <pending>
+## Illustration (Analogy or Micro‑Example)
+- <pending>
+## Boundaries (What It’s Not)
+- <pending>
+## Source Context (From the Note)
+- From: ${originLink}
+> Quote or paraphrase the 1–3 most relevant lines from the originating note that justify this definition.
+
+Originating note context:
+${safeContext}`;
   }
 
   async queryCopilot(prompt) {

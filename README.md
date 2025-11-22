@@ -36,6 +36,7 @@ Output strictly in this template:
 ## Boundaries (What It’s Not)
 - Contrast with near‑miss ideas to avoid confusion.
 ## Source Context (From the Note)
+- From: [[<origin note title>]]
 > Quote or paraphrase the 1–3 most relevant lines from the originating note that justify this definition.
 
 Guidelines:
