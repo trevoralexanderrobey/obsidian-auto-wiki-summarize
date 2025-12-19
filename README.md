@@ -48,6 +48,8 @@ Guidelines:
 1) Enable community plugins in Obsidian.
 2) Install/enable “Contextual Wiki Definitions”.
 3) Open Settings → Contextual Wiki Definitions → paste your Copilot believer/plus license key.
+   - The license key field is masked by default (password type) for security.
+   - Use the "Reveal" button to temporarily show the key if needed.
 
 ## Usage
 - Type a wiki link like `[[Your Term]]` in a note, then click it.
@@ -60,9 +62,33 @@ Guidelines:
 - Listens to `file-open` events; when an empty Markdown file opens, it treats the previously active note as the origin context.
 - Sends a single prompt (with the template + origin content) to the Copilot API and writes the returned Markdown into the new note.
 
-## Privacy
-- Only the origin note content and the `[[term]]` are sent to the API.
-- No other vault files are transmitted by this plugin.
+## Privacy & Security
+
+### Data Sent to API
+- **Origin note content**: The full text of the previously active note (up to 20,000 characters) is sent as context.
+- **Term being defined**: The basename of the new note (the `[[term]]` you clicked).
+- **No other vault data**: Only the single origin note and term are transmitted. No other files, settings, or vault metadata are sent.
+
+### Output Sanitization (Security)
+By default, the plugin sanitizes all API responses before writing them to your notes to prevent code injection:
+
+- **Code blocks stripped by default**: All fenced code blocks (including `dataviewjs`, `javascript`, `typescript`, `bash`, etc.) are removed from generated definitions. This prevents execution of potentially dangerous code.
+- **HTML tags stripped by default**: Dangerous HTML tags (`<script>`, `<iframe>`, `<object>`, `<embed>`) are removed.
+- **Output length limit**: Generated definitions are capped at 60,000 characters (configurable) to prevent huge writes.
+
+**To customize sanitization:**
+- Open Settings → Contextual Wiki Definitions
+- Toggle "Allow code blocks in output" to preserve code blocks (not recommended unless you trust the API)
+- Toggle "Allow raw HTML in output" to preserve HTML tags (not recommended)
+- Adjust "Maximum output length" if needed
+
+**Why sanitization matters:** The remote API response is untrusted content. Without sanitization, malicious code blocks (especially `dataviewjs`) could execute when Obsidian renders your notes, potentially accessing your vault data or performing unwanted actions.
+
+### Network Requests
+- The plugin uses Obsidian's `requestUrl()` API when available (better integration, mobile support).
+- Falls back to standard `fetch()` if `requestUrl()` is unavailable or fails.
+- All requests timeout after 30 seconds.
+- Error responses are logged with truncated bodies (first 300 chars) to reduce sensitive data exposure.
 
 ## Troubleshooting
 - Nothing happens: ensure the new note is empty and you clicked a freshly created wiki link.
