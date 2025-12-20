@@ -238,38 +238,48 @@ module.exports = class ContextualWikiDefinitions extends Plugin {
   }
 
   buildPrompt(term, context, originLink) {
-    return `Role: You create precise, context-grounded definitions for a selected [[Wiki Link]] using only the originating note's context and closely related vault context the model already has. Prioritize clarity, correctness, and semantic linkage.
+    return `Role: Create a precise, context-grounded definition for [[${term}]] using ONLY the originating note context. Do not invent sources, citations, or external facts.
 
-Instructions:
-- Infer the intended meaning of the selected [[Wiki Link]] from the active note's surrounding sentences and headings.
-- When multiple senses exist, pick the one best supported by the note context.
-- Use concise, high-signal prose. Keep formatting clean markdown.
-- Prefer [[wiki links]] for related concepts already present in the vault context.
+Output rules (strict):
+- Total length: 180–260 words (excluding quotes).
+- Bullets: max 4 per list.
+- Use plain Markdown only. No HTML. No code blocks.
+- If context is insufficient, say so and ask for what's missing in 1 sentence.
 
-Output strictly in this template:
+Output format (exact headings; no extra sections):
+
+---
+aliases: ["${term}"]
+tags: ["wiki", "auto"]
+origin: "${originLink}"
+generated: true
+confidence: "0-100"
+sense: "one short phrase"
+---
+
 ## Term - The term being defined: [[${term}]]
-## One‑Sentence Definition
-- A single, precise sentence that captures the essence in this note’s context.
-## Full Definition (Context‑Aware)
-- 3–5 sentences grounded in the originating note. Clarify scope, key properties, and purpose.
-## Real‑World Applications
-- Short bullets (3–6) showing practical uses relevant to the note’s domain.
-## Related Concepts (Semantic Neighbors)
-- [[Concept A]] — brief relation (how/why it connects)
-- [[Concept B]] — brief relation
-- [[Concept C]] — brief relation
-## Illustration (Analogy or Micro‑Example)
-- A vivid analogy, metaphor, or short scenario that makes the concept intuitive.
-## Boundaries (What It’s Not)
-- Contrast with near‑miss ideas to avoid confusion.
+
+## One-Sentence Definition
+- (≤25 words)
+
+## Key Points
+- (3–4 bullets; each ≤12 words)
+
+## Example / Use (In this note's domain)
+- (1–2 bullets; concrete)
+
+## Boundaries (Not to confuse with)
+- (2 bullets; near-misses)
+
+## Related Concepts
+- (3–6 items; prefer [[wiki links]] when appropriate)
+
 ## Source Context (From the Note)
 - From: ${originLink}
-> Quote or paraphrase the 1–3 most relevant lines from the originating note that justify this definition.
+> (Quote EXACTLY 1–2 lines copied from the provided context. No paraphrase.)
 
-Guidelines:
-- Keep sections succinct; do not add extra sections.
-- Use the note’s vocabulary; avoid introducing new jargon unless necessary.
-- Maintain [[wiki links]] where useful for future graph connections.
+## Self-check
+- (One question that tests understanding in this context.)
 
 Originating note context:
 ${context}`;
@@ -349,22 +359,38 @@ ${context}`;
 
   _buildLocalTemplate(term, originLink, context) {
     const safeContext = context || '';
-    return `## Term - The term being defined: [[${term}]]
-## One‑Sentence Definition
+    return `---
+aliases: ["${term}"]
+tags: ["wiki", "auto"]
+origin: "${originLink}"
+generated: true
+confidence: "0"
+sense: "pending"
+---
+
+## Term - The term being defined: [[${term}]]
+
+## One-Sentence Definition
 - <pending>
-## Full Definition (Context‑Aware)
+
+## Key Points
 - <pending>
-## Real‑World Applications
+
+## Example / Use (In this note's domain)
 - <pending>
-## Related Concepts (Semantic Neighbors)
+
+## Boundaries (Not to confuse with)
 - <pending>
-## Illustration (Analogy or Micro‑Example)
+
+## Related Concepts
 - <pending>
-## Boundaries (What It’s Not)
-- <pending>
+
 ## Source Context (From the Note)
 - From: ${originLink}
-> Quote or paraphrase the 1–3 most relevant lines from the originating note that justify this definition.
+> <pending>
+
+## Self-check
+- <pending>
 
 Originating note context:
 ${safeContext}`;
